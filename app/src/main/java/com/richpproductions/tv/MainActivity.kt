@@ -56,6 +56,8 @@ class MainActivity : AppCompatActivity() {
     private var searchJob: Job? = null
     private var loaded = false
     private var refreshOnResume = false
+    private var expanded = false
+    private lateinit var navPanel: View
     private var latestRelease: Updater.Release? = null
     private var downloaded: Pair<Int, java.io.File>? = null
     private lateinit var btnUpdate: Button
@@ -89,6 +91,11 @@ class MainActivity : AppCompatActivity() {
         settingsBox = findViewById(R.id.settingsBox)
         setInfo = findViewById(R.id.setInfo)
         btnFormat = findViewById(R.id.btnFormat)
+        navPanel = findViewById(R.id.nav)
+        // moving into the grid hides the menus so more posters fit
+        grid.viewTreeObserver.addOnGlobalFocusChangeListener { _, now ->
+            if (now != null && !expanded && isInGrid(now)) setExpanded(true)
+        }
         btnUpdate = findViewById(R.id.btnUpdate)
         btnUpdate.setOnClickListener { updateApp() }
 
@@ -156,6 +163,7 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (expanded) { setExpanded(false); return }
                 when {
                     grid.hasFocus() && cats.visibility == View.VISIBLE -> focusCats()
                     grid.hasFocus() || search.hasFocus() || cats.hasFocus() || settingsBox.hasFocus() ->
@@ -274,6 +282,7 @@ class MainActivity : AppCompatActivity() {
     private fun selectSection(s: Section, force: Boolean = false) {
         if (s == section && !force) return
         section = s
+        if (expanded) { expanded = false; navPanel.visibility = View.VISIBLE }
         for ((k, v) in navs) v.isSelected = k == s
         epg.visibility = View.GONE
         settingsBox.visibility = if (s == Section.SETTINGS) View.VISIBLE else View.GONE
@@ -331,7 +340,7 @@ class MainActivity : AppCompatActivity() {
         epg.visibility = View.GONE
         val rows = items.isEmpty() || items.count { it.kind == Kind.LIVE } * 2 >= items.size
         val adapter = if (rows) rowAdapter else posterAdapter
-        val span = if (rows) 2 else 4
+        val span = spanFor(rows)
         val lm = grid.layoutManager
         if (grid.adapter !== adapter || lm !is GridLayoutManager || lm.spanCount != span) {
             grid.layoutManager = GridLayoutManager(this, span)
@@ -353,6 +362,46 @@ class MainActivity : AppCompatActivity() {
             }
             showItems("Results for \"$q\"", results)
         }
+    }
+
+    private fun spanFor(rows: Boolean) = if (rows) (if (expanded) 3 else 2) else (if (expanded) 6 else 4)
+
+    private fun isInGrid(v: View): Boolean {
+        var p: Any? = v
+        while (p is View) { if (p === grid) return true; p = p.parent }
+        return false
+    }
+
+    /** Full-screen grid (menus hidden) or normal layout. */
+    private fun setExpanded(on: Boolean) {
+        if (expanded == on) return
+        expanded = on
+        navPanel.visibility = if (on) View.GONE else View.VISIBLE
+        val showCats = !on && section != Section.SEARCH && section != Section.SETTINGS
+        cats.visibility = if (showCats) View.VISIBLE else View.GONE
+        val lm = grid.layoutManager as? GridLayoutManager
+        if (lm != null) {
+            val focused = grid.focusedChild?.let { grid.getChildAdapterPosition(it) } ?: RecyclerView.NO_POSITION
+            lm.spanCount = spanFor(grid.adapter === rowAdapter)
+            if (focused != RecyclerView.NO_POSITION) grid.post { lm.scrollToPosition(focused) }
+        }
+        if (!on) {
+            if (section == Section.SEARCH) search.requestFocus() else focusCats()
+        }
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        // Left on the first column brings the menus back
+        if (expanded && event.action == android.view.KeyEvent.ACTION_DOWN &&
+            event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
+            val child = grid.focusedChild
+            val lm = grid.layoutManager as? GridLayoutManager
+            if (child != null && lm != null) {
+                val pos = grid.getChildAdapterPosition(child)
+                if (pos != RecyclerView.NO_POSITION && pos % lm.spanCount == 0) { setExpanded(false); return true }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     /** Put the highlight back on the last channel / movie opened. */
