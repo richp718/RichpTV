@@ -45,6 +45,14 @@ class CategoriesActivity : AppCompatActivity() {
         findViewById<Button>(R.id.showAll).setOnClickListener {
             Prefs.setHidden(kind, emptySet()); refresh()
         }
+        val unhide = findViewById<Button>(R.id.unhideChannels)
+        fun label() { unhide.text = "Unhide channels (${Prefs.hiddenChannels().size})" }
+        label()
+        unhide.setOnClickListener {
+            val n = Prefs.hiddenChannels().size
+            Prefs.setHiddenChannels(emptySet()); label()
+            android.widget.Toast.makeText(this, if (n == 0) "No hidden channels" else "Brought back $n channel(s)", android.widget.Toast.LENGTH_SHORT).show()
+        }
         showKind(Kind.LIVE)
         tabs[Kind.LIVE]?.requestFocus()
     }

@@ -91,37 +91,13 @@ class PlayerActivity : AppCompatActivity() {
         if (player?.playbackState != Player.STATE_READY) tryNext("No picture after 12 seconds")
     }
 
-    private fun swapExt(url: String, from: String, to: String): String? {
-        val q = url.indexOf('?')
-        val path = if (q >= 0) url.substring(0, q) else url
-        val rest = if (q >= 0) url.substring(q) else ""
-        if (!path.endsWith(from, true)) return null
-        return path.substring(0, path.length - from.length) + to + rest
-    }
-
-    private fun candidatesFor(item: Item): List<Pair<String, Boolean>> {
-        val url = item.url ?: return emptyList()
-        val out = LinkedHashSet<Pair<String, Boolean>>()
-        if (item.kind == Kind.LIVE) {
-            val tsUrl = swapExt(url, ".m3u8", ".ts") ?: (if (swapExt(url, ".ts", ".ts") != null) url else null)
-            val hlsUrl = swapExt(url, ".ts", ".m3u8") ?: (if (swapExt(url, ".m3u8", ".m3u8") != null) url else null)
-            val ts = tsUrl?.let { it to false }
-            val hls = hlsUrl?.let { it to true }
-            if (Prefs.liveFormat == "m3u8") { hls?.let { out.add(it) }; ts?.let { out.add(it) } }
-            else { ts?.let { out.add(it) }; hls?.let { out.add(it) } }
-        }
-        out.add(url to false)
-        out.add(url to true)
-        return out.toList()
-    }
-
     private fun play(i: Int) {
         val item = queue.getOrNull(i) ?: return
         if (item.url == null) return
         index = i
         Repo.queueSeriesKey?.let { Prefs.setLastEpisode(it, item.key); Prefs.addRecent(it) } ?: Prefs.addRecent(item.key)
         if (item.kind == Kind.LIVE) Repo.lastOpenedKey = item.key
-        candidates = candidatesFor(item)
+        candidates = Repo.streamCandidates(item)
         attempt = 0
         resumeAt = if (item.kind != Kind.LIVE) Prefs.position(item.key) else 0L
         startAttempt()

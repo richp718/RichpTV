@@ -433,6 +433,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun onItemLong(pos: Int) {
         val item = shown.getOrNull(pos) ?: return
+        if (item.kind != Kind.LIVE || section == Section.FAVS) { toggleFavAt(pos, item); return }
+        val favLabel = if (Prefs.isFav(item.key)) "Remove from Favorites" else "★ Add to Favorites"
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(item.name)
+            .setItems(arrayOf(favLabel, "Hide this channel")) { _, which ->
+                if (which == 0) toggleFavAt(pos, item) else {
+                    Prefs.hideChannel(item.key)
+                    Toast.makeText(this, "Hid \"${item.name}\". Undo in Settings → Choose categories.", Toast.LENGTH_LONG).show()
+                    sourceList = sourceList.filter { it.key != item.key }
+                    shown = shown.filterIndexed { i, _ -> i != pos }
+                    (grid.adapter as? ItemAdapter)?.let { a -> a.items = shown }
+                    header.text = header.text.toString().substringBeforeLast("·").trimEnd() + "  ·  ${NumberFormat.getInstance().format(shown.size)}"
+                    val next = pos.coerceAtMost(shown.size - 1)
+                    if (next >= 0) grid.post { grid.scrollToPosition(next); grid.post { grid.layoutManager?.findViewByPosition(next)?.requestFocus() } }
+                }
+            }
+            .show()
+    }
+
+    private fun toggleFavAt(pos: Int, item: Item) {
         val added = Prefs.toggleFav(item.key)
         Toast.makeText(this, if (added) "★ Added to Favorites" else "Removed from Favorites", Toast.LENGTH_SHORT).show()
         grid.adapter?.notifyItemChanged(pos)

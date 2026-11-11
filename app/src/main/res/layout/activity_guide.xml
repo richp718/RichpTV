@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg"
@@ -38,10 +39,43 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="128dp"
+            android:layout_height="180dp"
             android:background="@drawable/overlay_bg"
-            android:orientation="vertical"
-            android:padding="14dp">
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <FrameLayout
+                android:layout_width="291dp"
+                android:layout_height="164dp"
+                android:background="#000000">
+
+                <androidx.media3.ui.PlayerView
+                    android:id="@+id/preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:focusable="false"
+                    app:use_controller="false"
+                    app:show_buffering="always"
+                    app:resize_mode="fit" />
+
+                <TextView
+                    android:id="@+id/previewHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:padding="10dp"
+                    android:text="Press OK on a channel to preview it here.\nPress OK again to watch full screen."
+                    android:textColor="@color/muted"
+                    android:textSize="13sp" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="14dp"
+                android:orientation="vertical"
+                android:paddingTop="4dp">
 
             <TextView
                 android:id="@+id/infoTitle"
@@ -66,9 +100,19 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:ellipsize="end"
-                android:maxLines="3"
+                android:maxLines="4"
                 android:textColor="@color/muted"
                 android:textSize="14sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="bottom"
+                android:text="OK = preview  ·  OK again = full screen  ·  Hold OK = favorite / hide channel"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <FrameLayout

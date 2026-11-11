@@ -55,7 +55,20 @@ object Prefs {
         return nowHidden
     }
 
-    fun isHidden(item: Item) = hidden(item.kind).contains(item.group)
+    fun isHidden(item: Item) = hidden(item.kind).contains(item.group) || hiddenChannels().contains(item.key)
+
+    // ----- hidden single channels -----
+    private var hidChCache: MutableSet<String>? = null
+
+    fun hiddenChannels(): Set<String> =
+        hidChCache ?: (sp.getStringSet("hid_channels", emptySet()) ?: emptySet()).toMutableSet().also { hidChCache = it }
+
+    fun setHiddenChannels(keys: Set<String>) {
+        hidChCache = keys.toMutableSet()
+        sp.edit().putStringSet("hid_channels", HashSet(keys)).apply()
+    }
+
+    fun hideChannel(key: String) = setHiddenChannels(hiddenChannels() + key)
 
     // ----- last episode watched per series -----
     fun lastEpisode(seriesKey: String): String = str("last_$seriesKey")

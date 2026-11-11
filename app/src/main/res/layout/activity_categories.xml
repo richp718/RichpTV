@@ -34,6 +34,8 @@
         <View android:layout_width="24dp" android:layout_height="1dp" />
         <Button android:id="@+id/hideAll" style="@style/Btn" android:text="Hide all" />
         <Button android:id="@+id/showAll" style="@style/Btn" android:text="Show all" />
+        <View android:layout_width="24dp" android:layout_height="1dp" />
+        <Button android:id="@+id/unhideChannels" style="@style/Btn" android:text="Unhide channels" />
     </LinearLayout>
 
     <TextView

@@ -11,9 +11,19 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
@@ -24,7 +34,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Grid TV guide: channels down the side, programmes across a 3-hour timeline. */
+/** Grid TV guide: channels down the side, programmes across a 3-hour timeline.
+ *  OK on a channel = live preview in the top-left box; OK again on the same channel = full screen.
+ *  Hold OK = favorite / hide that channel. */
 class GuideActivity : AppCompatActivity() {
 
     private val windowMinutes = 180
@@ -42,6 +54,24 @@ class GuideActivity : AppCompatActivity() {
     private var catJob: Job? = null
     private var focusJob: Job? = null
 
+    // ----- live preview -----
+    private lateinit var previewView: PlayerView
+    private lateinit var previewHint: TextView
+    private var preview: ExoPlayer? = null
+    private var previewKey: String? = null
+    private var previewCands: List<Pair<String, Boolean>> = emptyList()
+    private var previewAttempt = 0
+    private val previewListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_READY) previewHint.visibility = View.GONE
+        }
+        override fun onPlayerError(error: PlaybackException) {
+            previewAttempt++
+            if (previewAttempt < previewCands.size) startPreviewAttempt()
+            else { previewHint.text = "This channel isn't playing right now."; previewHint.visibility = View.VISIBLE }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(this)
@@ -50,12 +80,14 @@ class GuideActivity : AppCompatActivity() {
         infoTitle = findViewById(R.id.infoTitle)
         infoTime = findViewById(R.id.infoTime)
         infoDesc = findViewById(R.id.infoDesc)
+        previewView = findViewById(R.id.preview)
+        previewHint = findViewById(R.id.previewHint)
 
         val now = System.currentTimeMillis() / 1000
         winStart = now - (now % 1800)   // round down to the half hour
 
         val dm = resources.displayMetrics
-        val timelinePx = dm.widthPixels - dp(220) - dp(24) - dp(210) - dp(10)
+        val timelinePx = dm.widthPixels - dp(220) - dp(24) - dp(210) - dp(10) - dp(6)
         pxPerMin = timelinePx / windowMinutes.toFloat()
         buildTimeHeader()
 
@@ -155,8 +187,94 @@ class GuideActivity : AppCompatActivity() {
         rows.post { rows.layoutManager?.findViewByPosition(pos)?.requestFocus() }
     }
 
+    private fun startPreview(ch: Item) {
+        val p = preview ?: run {
+            val http = DefaultHttpDataSource.Factory()
+                .setUserAgent(Repo.UA)
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(20000)
+            ExoPlayer.Builder(this)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
+                .build().also {
+                    it.addListener(previewListener)
+                    previewView.player = it
+                    preview = it
+                }
+        }
+        previewKey = ch.key
+        previewCands = Repo.streamCandidates(ch)
+        previewAttempt = 0
+        previewHint.text = "Loading ${ch.name}…"
+        previewHint.visibility = View.VISIBLE
+        p.playWhenReady = true
+        startPreviewAttempt()
+    }
+
+    private fun startPreviewAttempt() {
+        val p = preview ?: return
+        val (url, hls) = previewCands.getOrNull(previewAttempt) ?: return
+        val b = MediaItem.Builder().setUri(url)
+        if (hls) b.setMimeType(MimeTypes.APPLICATION_M3U8)
+        p.setMediaItem(b.build())
+        p.prepare()
+    }
+
+    private fun stopPreview() {
+        preview?.release()
+        preview = null
+        previewView.player = null
+        previewKey = null
+        previewHint.text = "Press OK on a channel to preview it here.\nPress OK again to watch full screen."
+        previewHint.visibility = View.VISIBLE
+    }
+
+    override fun onStop() {
+        stopPreview()
+        super.onStop()
+    }
+
+    private fun onChannelClick(pos: Int) {
+        val ch = channels.getOrNull(pos) ?: return
+        if (previewKey == ch.key) play(pos) else startPreview(ch)
+    }
+
+    private fun onChannelLong(pos: Int) {
+        val ch = channels.getOrNull(pos) ?: return
+        val favLabel = if (Prefs.isFav(ch.key)) "Remove from Favorites" else "★ Add to Favorites"
+        AlertDialog.Builder(this)
+            .setTitle(ch.name)
+            .setItems(arrayOf(favLabel, "Hide this channel")) { _, which ->
+                if (which == 0) {
+                    val added = Prefs.toggleFav(ch.key)
+                    Toast.makeText(this, if (added) "★ Added to Favorites" else "Removed from Favorites", Toast.LENGTH_SHORT).show()
+                } else hideChannel(pos)
+            }
+            .show()
+    }
+
+    private fun hideChannel(pos: Int) {
+        val ch = channels.getOrNull(pos) ?: return
+        Prefs.hideChannel(ch.key)
+        if (previewKey == ch.key) stopPreview()
+        Toast.makeText(this, "Hid \"${ch.name}\". Undo in Settings → Choose categories.", Toast.LENGTH_LONG).show()
+        channels = channels.filterIndexed { i, _ -> i != pos }
+        rowAdapter.notifyItemRemoved(pos)
+        val groups = Repo.groups(Repo.visible(Repo.live))
+        if (groups.size == catAdapter.cats.size) {
+            catAdapter.replaceLabels(groups)
+            catAdapter.notifyItemChanged(catAdapter.selected)
+        } else {
+            catAdapter.set(groups, 0); showCategory(0)
+            return
+        }
+        val next = pos.coerceAtMost(channels.size - 1)
+        if (next >= 0) rows.post { rows.layoutManager?.findViewByPosition(next)?.requestFocus() }
+    }
+
     private fun play(pos: Int) {
         if (channels.isEmpty()) return
+        stopPreview()   // free the stream first — many providers allow only one connection
         Repo.lastOpenedKey = channels.getOrNull(pos)?.key
         Repo.queue = channels
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("index", pos))
@@ -175,13 +293,10 @@ class GuideActivity : AppCompatActivity() {
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
             val v = LayoutInflater.from(parent.context).inflate(R.layout.item_guide_row, parent, false)
             val h = VH(v)
-            v.setOnClickListener { val p = h.bindingAdapterPosition; if (p != RecyclerView.NO_POSITION) play(p) }
+            v.setOnClickListener { val p = h.bindingAdapterPosition; if (p != RecyclerView.NO_POSITION) onChannelClick(p) }
             v.setOnLongClickListener {
                 val p = h.bindingAdapterPosition
-                if (p != RecyclerView.NO_POSITION) {
-                    val added = Prefs.toggleFav(channels[p].key)
-                    Toast.makeText(this@GuideActivity, if (added) "★ Added to Favorites" else "Removed from Favorites", Toast.LENGTH_SHORT).show()
-                }
+                if (p != RecyclerView.NO_POSITION) onChannelLong(p)
                 true
             }
             v.setOnFocusChangeListener { _, f ->

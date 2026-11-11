@@ -150,11 +150,38 @@ object Repo {
         loadedAt = System.currentTimeMillis()
     }
 
-    /** Items whose category the user hasn't hidden. */
+    /** Items whose category (or single channel) the user hasn't hidden. */
     fun visible(list: List<Item>): List<Item> {
         val kind = list.firstOrNull()?.kind ?: return list
         val hid = Prefs.hidden(kind)
-        return if (hid.isEmpty()) list else list.filter { it.group !in hid }
+        val hidCh = if (kind == Kind.LIVE) Prefs.hiddenChannels() else emptySet()
+        return if (hid.isEmpty() && hidCh.isEmpty()) list
+               else list.filter { it.group !in hid && it.key !in hidCh }
+    }
+
+    private fun swapExt(url: String, from: String, to: String): String? {
+        val q = url.indexOf('?')
+        val path = if (q >= 0) url.substring(0, q) else url
+        val rest = if (q >= 0) url.substring(q) else ""
+        if (!path.endsWith(from, true)) return null
+        return path.substring(0, path.length - from.length) + to + rest
+    }
+
+    /** Different ways to open the same stream (url, isHls): TS, HLS, as-is. Tried in order until one plays. */
+    fun streamCandidates(item: Item): List<Pair<String, Boolean>> {
+        val url = item.url ?: return emptyList()
+        val out = LinkedHashSet<Pair<String, Boolean>>()
+        if (item.kind == Kind.LIVE) {
+            val tsUrl = swapExt(url, ".m3u8", ".ts") ?: (if (swapExt(url, ".ts", ".ts") != null) url else null)
+            val hlsUrl = swapExt(url, ".ts", ".m3u8") ?: (if (swapExt(url, ".m3u8", ".m3u8") != null) url else null)
+            val ts = tsUrl?.let { it to false }
+            val hls = hlsUrl?.let { it to true }
+            if (Prefs.liveFormat == "m3u8") { hls?.let { out.add(it) }; ts?.let { out.add(it) } }
+            else { ts?.let { out.add(it) }; hls?.let { out.add(it) } }
+        }
+        out.add(url to false)
+        out.add(url to true)
+        return out.toList()
     }
 
     /** Every category for a kind (hidden ones included), in the provider's order. */
