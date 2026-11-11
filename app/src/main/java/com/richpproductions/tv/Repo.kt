@@ -351,6 +351,16 @@ object Repo {
         return if (h > 0) "${h}h ${m}m" else "${m}m"
     }
 
+    /** "2025-03-04" → "Mar 4, 2025" (leaves other formats as they are). */
+    private fun prettyDate(raw: String): String {
+        val v = raw.trim()
+        if (v.isEmpty() || v.startsWith("0000")) return ""
+        return try {
+            val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(v.take(10)) ?: return v
+            SimpleDateFormat("MMM d, yyyy", Locale.US).format(d)
+        } catch (e: Exception) { v }
+    }
+
     private fun metaLine(year: String, genre: String, duration: String, rating: String): String {
         val r = rating.toDoubleOrNull()?.takeIf { it > 0 }?.let { "★ " + String.format(Locale.US, "%.1f", it) } ?: ""
         return listOf(year.take(4), genre, duration, r).filter { it.isNotBlank() }.joinToString("   ·   ")
@@ -405,7 +415,9 @@ object Repo {
                 val ei = e.optJSONObject("info") ?: JSONObject()
                 val dur = prettyDuration(firstString(ei, "duration"), firstString(ei, "duration_secs"))
                 val title = js(e, "title").ifBlank { "Episode $num" }
-                Item("E:$id", "E$num   ·   $title" + (if (dur.isNotBlank()) "   ·   $dur" else ""),
+                val aired = prettyDate(firstString(ei, "air_date", "airdate", "releasedate", "release_date", "releaseDate"))
+                val extra = listOf(dur, if (aired.isNotBlank()) "Aired $aired" else "").filter { it.isNotBlank() }
+                Item("E:$id", "E$num   ·   $title" + extra.joinToString("") { "   ·   $it" },
                     firstString(ei, "movie_image").ifBlank { null }, "Season $season",
                     "$b/series/$user/$pass/$id.$ext", Kind.MOVIE)
             }
