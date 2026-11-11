@@ -126,6 +126,7 @@
                     android:textColor="@color/muted"
                     android:textSize="16sp" />
 
+                <Button android:id="@+id/btnUpdate" style="@style/Btn" android:text="Check for app updates" />
                 <Button android:id="@+id/btnPlaylist" style="@style/Btn" android:text="Change playlist" />
                 <Button android:id="@+id/btnCats" style="@style/Btn" android:text="Choose categories (hide countries)" />
                 <Button android:id="@+id/btnReload" style="@style/Btn" android:text="Reload playlist" />

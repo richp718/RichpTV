@@ -56,6 +56,9 @@ class MainActivity : AppCompatActivity() {
     private var searchJob: Job? = null
     private var loaded = false
     private var refreshOnResume = false
+    private var latestRelease: Updater.Release? = null
+    private var downloaded: Pair<Int, java.io.File>? = null
+    private lateinit var btnUpdate: Button
 
     private val time = SimpleDateFormat("h:mm a", Locale.US)
 
@@ -86,6 +89,8 @@ class MainActivity : AppCompatActivity() {
         settingsBox = findViewById(R.id.settingsBox)
         setInfo = findViewById(R.id.setInfo)
         btnFormat = findViewById(R.id.btnFormat)
+        btnUpdate = findViewById(R.id.btnUpdate)
+        btnUpdate.setOnClickListener { updateApp() }
 
         findViewById<TextView>(R.id.navGuide).setOnClickListener {
             if (loaded) startActivity(Intent(this, GuideActivity::class.java))
@@ -179,6 +184,57 @@ class MainActivity : AppCompatActivity() {
         status.visibility = View.GONE
         selectSection(Section.LIVE, true)
         navs[Section.LIVE]?.requestFocus()
+        checkForUpdate()
+    }
+
+    private fun checkForUpdate() {
+        lifecycleScope.launch {
+            val rel = Updater.latest() ?: return@launch
+            if (rel.build > Updater.currentBuild(this@MainActivity)) {
+                latestRelease = rel
+                btnUpdate.text = "⬇  Update app  (new version ready)"
+                Toast.makeText(this@MainActivity, "A RichpTV update is ready.  Go to Settings → Update app.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun updateApp() {
+        lifecycleScope.launch {
+            val current = Updater.currentBuild(this@MainActivity)
+            btnUpdate.isEnabled = false
+            btnUpdate.text = "Checking for updates…"
+            val rel = Updater.latest().also { latestRelease = it }
+            if (rel == null) {
+                btnUpdate.isEnabled = true
+                btnUpdate.text = "Check for app updates"
+                Toast.makeText(this@MainActivity, "Couldn't check for updates. Check the internet connection.", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if (rel.build <= current) {
+                btnUpdate.isEnabled = true
+                btnUpdate.text = "Check for app updates"
+                Toast.makeText(this@MainActivity, "You already have the newest version.", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            try {
+                val have = downloaded
+                val file = if (have != null && have.first == rel.build && have.second.exists()) have.second
+                    else Updater.download(this@MainActivity, rel.apkUrl) { pct -> btnUpdate.text = "Downloading update…  $pct%" }
+                downloaded = rel.build to file
+                btnUpdate.isEnabled = true
+                btnUpdate.text = "⬇  Install update"
+                if (!Updater.install(this@MainActivity, file)) {
+                    Toast.makeText(this@MainActivity,
+                        "One-time step: allow RichpTV to install apps, then come back and click Install update.\n" +
+                        "Fire TV: Settings → My Fire TV → Developer Options → Install Unknown Apps → RichpTV → On",
+                        Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                btnUpdate.isEnabled = true
+                btnUpdate.text = "⬇  Update app  (try again)"
+                Toast.makeText(this@MainActivity, "Update download failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     /** Opens instantly from the saved copy; downloads only when needed. */
