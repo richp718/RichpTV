@@ -31,7 +31,6 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var overlay: TextView
     private var player: ExoPlayer? = null
     private var index = 0
-    private var triedHls = false
     private var retries = 0
     private val handler = Handler(Looper.getMainLooper())
     private val hideOverlay = Runnable { overlay.visibility = View.GONE }
@@ -84,24 +83,83 @@ class PlayerActivity : AppCompatActivity() {
         super.onStop()
     }
 
-    private fun play(i: Int, forceHls: Boolean = false) {
-        val p = player ?: return
+    /** Different ways to open the same stream: TS, HLS, as-is. Tried in order until one plays. */
+    private var candidates: List<Pair<String, Boolean>> = emptyList()
+    private var attempt = 0
+    private var resumeAt = 0L
+    private val stallCheck = Runnable {
+        if (player?.playbackState != Player.STATE_READY) tryNext("No picture after 12 seconds")
+    }
+
+    private fun swapExt(url: String, from: String, to: String): String? {
+        val q = url.indexOf('?')
+        val path = if (q >= 0) url.substring(0, q) else url
+        val rest = if (q >= 0) url.substring(q) else ""
+        if (!path.endsWith(from, true)) return null
+        return path.substring(0, path.length - from.length) + to + rest
+    }
+
+    private fun candidatesFor(item: Item): List<Pair<String, Boolean>> {
+        val url = item.url ?: return emptyList()
+        val out = LinkedHashSet<Pair<String, Boolean>>()
+        if (item.kind == Kind.LIVE) {
+            val tsUrl = swapExt(url, ".m3u8", ".ts") ?: (if (swapExt(url, ".ts", ".ts") != null) url else null)
+            val hlsUrl = swapExt(url, ".ts", ".m3u8") ?: (if (swapExt(url, ".m3u8", ".m3u8") != null) url else null)
+            val ts = tsUrl?.let { it to false }
+            val hls = hlsUrl?.let { it to true }
+            if (Prefs.liveFormat == "m3u8") { hls?.let { out.add(it) }; ts?.let { out.add(it) } }
+            else { ts?.let { out.add(it) }; hls?.let { out.add(it) } }
+        }
+        out.add(url to false)
+        out.add(url to true)
+        return out.toList()
+    }
+
+    private fun play(i: Int) {
         val item = queue.getOrNull(i) ?: return
-        val url = item.url ?: return
+        if (item.url == null) return
         index = i
-        triedHls = forceHls
         Repo.queueSeriesKey?.let { Prefs.setLastEpisode(it, item.key); Prefs.addRecent(it) } ?: Prefs.addRecent(item.key)
+        candidates = candidatesFor(item)
+        attempt = 0
+        resumeAt = if (item.kind != Kind.LIVE) Prefs.position(item.key) else 0L
+        startAttempt()
+        val extra = if (item.kind == Kind.LIVE) "\nChannel ${i + 1} of ${queue.size}   ·   ▲▼ to change"
+                    else if (resumeAt > 0) "\nResuming where you left off" else ""
+        showOverlay(item.name + extra)
+    }
+
+    private fun startAttempt() {
+        val p = player ?: return
+        val item = current ?: return
+        val (url, hls) = candidates.getOrNull(attempt) ?: return
+        handler.removeCallbacks(stallCheck)
         val b = MediaItem.Builder()
             .setUri(url)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(item.name).build())
-        if (forceHls) b.setMimeType(MimeTypes.APPLICATION_M3U8)
-        val start = if (item.kind != Kind.LIVE) Prefs.position(item.key) else 0L
-        if (start > 0) p.setMediaItem(b.build(), start) else p.setMediaItem(b.build())
+        if (hls) b.setMimeType(MimeTypes.APPLICATION_M3U8)
+        if (resumeAt > 0) p.setMediaItem(b.build(), resumeAt) else p.setMediaItem(b.build())
         p.prepare()
         p.play()
-        val extra = if (item.kind == Kind.LIVE) "\nChannel ${i + 1} of ${queue.size}   ·   ▲▼ to change"
-                    else if (start > 0) "\nResuming where you left off" else ""
-        showOverlay(item.name + extra)
+        handler.postDelayed(stallCheck, if (item.kind == Kind.LIVE) 12_000L else 25_000L)
+    }
+
+    private fun tryNext(reason: String) {
+        handler.removeCallbacks(stallCheck)
+        if (attempt + 1 < candidates.size) {
+            attempt++
+            startAttempt()
+            return
+        }
+        if (isLive && retries < 2) {
+            retries++
+            attempt = 0
+            showOverlay("Reconnecting… ($retries)")
+            handler.postDelayed({ startAttempt() }, 2000)
+            return
+        }
+        player?.stop()
+        showOverlay("This channel won't play right now.\n$reason\nPress ▲▼ to try another channel.", 10_000)
     }
 
     private fun showOverlay(text: String, ms: Long = 3500) {
@@ -113,7 +171,17 @@ class PlayerActivity : AppCompatActivity() {
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
-            if (state == Player.STATE_READY) retries = 0
+            if (state == Player.STATE_READY) {
+                handler.removeCallbacks(stallCheck)
+                retries = 0
+                // remember which stream type works for this provider
+                val url = candidates.getOrNull(attempt)?.first ?: ""
+                if (isLive && Repo.isXtream) {
+                    val path = url.substringBefore('?')
+                    if (path.endsWith(".m3u8", true)) Prefs.liveFormat = "m3u8"
+                    else if (path.endsWith(".ts", true)) Prefs.liveFormat = "ts"
+                }
+            }
             if (state == Player.STATE_ENDED && !isLive) {
                 current?.let { Prefs.savePosition(it.key, 0) }
                 if (index + 1 < queue.size) play(index + 1) else finish()
@@ -121,19 +189,7 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            val url = current?.url ?: return
-            if (!triedHls && !url.contains(".m3u8", true)) {
-                play(index, forceHls = true)
-                return
-            }
-            if (isLive && retries < 3) {
-                retries++
-                showOverlay("Reconnecting… ($retries)")
-                val i = index
-                handler.postDelayed({ play(i) }, 2000)
-                return
-            }
-            showOverlay("This one won't play right now.\n${error.errorCodeName}", 8000)
+            tryNext(error.errorCodeName)
         }
     }
 
@@ -150,7 +206,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun zap(delta: Int) {
         if (queue.size < 2) return
         retries = 0
-        handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(stallCheck)
         play(((index + delta) % queue.size + queue.size) % queue.size)
     }
 

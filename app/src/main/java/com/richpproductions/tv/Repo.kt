@@ -24,7 +24,7 @@ import java.util.zip.GZIPInputStream
 import org.xmlpull.v1.XmlPullParser
 
 object Repo {
-    const val UA = "RichpTV/1.0 (Linux; Android)"
+    const val UA = "VLC/3.0.20 LibVLC/3.0.20"
 
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
