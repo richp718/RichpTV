@@ -18,6 +18,8 @@ class CatAdapter(
         private set
     var selected = 0
         private set
+    /** Show "(count)" after each label. Off for plain lists like channels. */
+    var showCounts = true
 
     class VH(val t: TextView) : RecyclerView.ViewHolder(t)
 
@@ -62,7 +64,7 @@ class CatAdapter(
 
     override fun onBindViewHolder(h: VH, position: Int) {
         val (name, count) = cats[position]
-        h.t.text = "$name  ($count)"
+        h.t.text = if (showCounts) "$name  ($count)" else name
         h.t.isSelected = position == selected
     }
 }

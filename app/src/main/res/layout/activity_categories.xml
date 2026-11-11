@@ -9,6 +9,7 @@
     android:paddingEnd="36dp">
 
     <TextView
+        android:id="@+id/title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Choose categories"
@@ -16,10 +17,11 @@
         android:textStyle="bold" />
 
     <TextView
+        android:id="@+id/hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="Click a category to hide or show it. Tip: press Hide all, then turn back on only the ones you watch."
+        android:text="Click a category to hide or show it. Hold OK on a Live TV category to pick single channels inside it."
         android:textColor="@color/muted"
         android:textSize="15sp" />
 
@@ -35,7 +37,7 @@
         <Button android:id="@+id/hideAll" style="@style/Btn" android:text="Hide all" />
         <Button android:id="@+id/showAll" style="@style/Btn" android:text="Show all" />
         <View android:layout_width="24dp" android:layout_height="1dp" />
-        <Button android:id="@+id/unhideChannels" style="@style/Btn" android:text="Unhide channels" />
+        <Button android:id="@+id/unhideChannels" style="@style/Btn" android:text="Hidden channels" />
     </LinearLayout>
 
     <TextView
