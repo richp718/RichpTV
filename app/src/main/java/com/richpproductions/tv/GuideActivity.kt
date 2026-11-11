@@ -146,8 +146,18 @@ class GuideActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        val key = Repo.lastOpenedKey ?: return
+        val pos = channels.indexOfFirst { it.key == key }
+        if (pos < 0) return
+        rows.scrollToPosition(pos)
+        rows.post { rows.layoutManager?.findViewByPosition(pos)?.requestFocus() }
+    }
+
     private fun play(pos: Int) {
         if (channels.isEmpty()) return
+        Repo.lastOpenedKey = channels.getOrNull(pos)?.key
         Repo.queue = channels
         startActivity(Intent(this, PlayerActivity::class.java).putExtra("index", pos))
     }

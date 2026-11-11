@@ -174,7 +174,12 @@ class MainActivity : AppCompatActivity() {
         if (loaded && (section == Section.FAVS || refreshOnResume)) {
             refreshOnResume = false
             section?.let { selectSection(it, true) }
-        } else { rowAdapter.notifyDataSetChanged(); posterAdapter.notifyDataSetChanged() }
+            restoreFocus()
+        } else if (loaded) {
+            // refresh stars in place (keeps the highlight) and go back to what was watched
+            grid.adapter?.let { it.notifyItemRangeChanged(0, it.itemCount) }
+            restoreFocus()
+        }
     }
 
     private fun openSetup() = setupLauncher.launch(Intent(this, SetupActivity::class.java))
@@ -350,8 +355,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Put the highlight back on the last channel / movie opened. */
+    private fun restoreFocus() {
+        val key = Repo.lastOpenedKey ?: return
+        val pos = shown.indexOfFirst { it.key == key }
+        if (pos < 0) return
+        grid.scrollToPosition(pos)
+        grid.post {
+            val v = grid.layoutManager?.findViewByPosition(pos)
+            if (v != null) v.requestFocus()
+            else grid.post { grid.layoutManager?.findViewByPosition(pos)?.requestFocus() }
+        }
+    }
+
     private fun onItemClick(pos: Int) {
         val item = shown.getOrNull(pos) ?: return
+        Repo.lastOpenedKey = item.key
         if (item.kind != Kind.LIVE && Repo.byKey(item.key) != null) {
             startActivity(Intent(this, DetailActivity::class.java).putExtra("key", item.key))
             return

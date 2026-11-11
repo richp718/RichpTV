@@ -120,6 +120,7 @@ class PlayerActivity : AppCompatActivity() {
         if (item.url == null) return
         index = i
         Repo.queueSeriesKey?.let { Prefs.setLastEpisode(it, item.key); Prefs.addRecent(it) } ?: Prefs.addRecent(item.key)
+        if (item.kind == Kind.LIVE) Repo.lastOpenedKey = item.key
         candidates = candidatesFor(item)
         attempt = 0
         resumeAt = if (item.kind != Kind.LIVE) Prefs.position(item.key) else 0L

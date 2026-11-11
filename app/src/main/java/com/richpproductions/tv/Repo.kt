@@ -49,6 +49,9 @@ object Repo {
     var queue: List<Item> = emptyList()
         set(v) { field = v; queueSeriesKey = null }
 
+    /** The channel/movie/series the user last opened, so lists can put the highlight back on it. */
+    @Volatile var lastOpenedKey: String? = null
+
     /** Set when the queue is a series' episodes, so the player can remember progress. */
     var queueSeriesKey: String? = null
 
