@@ -13,6 +13,12 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.net.URLEncoder
@@ -48,12 +54,97 @@ object Repo {
 
     fun byKey(k: String): Item? = index[k]
 
+    // ---------------- Saved copy of the playlist (fast start) ----------------
+
+    private const val CACHE_VERSION = 1
+    /** What the data in memory belongs to; empty when nothing is loaded. */
+    @Volatile var loadedIdentity = ""
+        private set
+    @Volatile var loadedAt = 0L
+        private set
+
+    fun identity() = listOf(Prefs.mode, Prefs.m3uUrl, Prefs.server, Prefs.user, Prefs.pass).joinToString("|")
+
+    /** True when the playlist in memory is the current one. */
+    val isLoaded: Boolean get() = loadedIdentity.isNotEmpty() && loadedIdentity == identity()
+
+    private fun cacheFile(dir: File) = File(dir, "playlist.bin")
+
+    suspend fun saveCache(dir: File) = withContext(Dispatchers.IO) {
+        try {
+            val tmp = File(dir, "playlist.tmp")
+            DataOutputStream(BufferedOutputStream(FileOutputStream(tmp), 1 shl 16)).use { o ->
+                o.writeInt(CACHE_VERSION)
+                o.writeUTF(loadedIdentity)
+                o.writeLong(loadedAt)
+                o.writeUTF(m3uEpgUrl)
+                for (k in Kind.values()) {
+                    val ord = order[k] ?: emptyList()
+                    o.writeInt(ord.size); for (g in ord) o.writeUTF(g)
+                }
+                for (list in listOf(live, movies, series)) {
+                    o.writeInt(list.size)
+                    for (i in list) {
+                        o.writeUTF(i.key); o.writeUTF(i.name); o.writeUTF(i.logo ?: ""); o.writeUTF(i.group)
+                        o.writeUTF(i.url ?: ""); o.writeInt(i.kind.ordinal); o.writeUTF(i.streamId ?: "")
+                        o.writeUTF(i.seriesId ?: ""); o.writeUTF(i.epgId ?: "")
+                    }
+                }
+            }
+            tmp.renameTo(cacheFile(dir))
+        } catch (e: Exception) { }
+    }
+
+    /** Load the saved playlist if it belongs to the current login. */
+    suspend fun loadCache(dir: File): Boolean = withContext(Dispatchers.IO) {
+        val f = cacheFile(dir)
+        if (!f.exists()) return@withContext false
+        try {
+            DataInputStream(BufferedInputStream(FileInputStream(f), 1 shl 16)).use { r ->
+                if (r.readInt() != CACHE_VERSION) return@withContext false
+                val id = r.readUTF()
+                if (id != identity()) return@withContext false
+                val at = r.readLong()
+                val epgUrl = r.readUTF()
+                val ord = HashMap<Kind, List<String>>()
+                for (k in Kind.values()) { val n = r.readInt(); ord[k] = List(n) { r.readUTF() } }
+                val kinds = Kind.values()
+                fun e(v: String) = v.ifEmpty { null }
+                val lists = List(3) {
+                    val n = r.readInt()
+                    val out = ArrayList<Item>(n)
+                    repeat(n) {
+                        val key = r.readUTF(); val name = r.readUTF(); val logo = e(r.readUTF()); val group = r.readUTF()
+                        val url = e(r.readUTF()); val kind = kinds[r.readInt()]; val sid = e(r.readUTF())
+                        val ser = e(r.readUTF()); val epg = e(r.readUTF())
+                        out.add(Item(key, name, logo, group, url, kind, sid, ser, epg))
+                    }
+                    out
+                }
+                live = lists[0]; movies = lists[1]; series = lists[2]
+                order = ord
+                m3uEpgUrl = epgUrl
+                index = (live + movies + series).associateBy { it.key }
+                epgCache.clear()
+                xmltv = null
+                loadedIdentity = id
+                loadedAt = at
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun load() = withContext(Dispatchers.IO) {
         epgCache.clear()
         xmltv = null
         m3uEpgUrl = ""
+        val id = identity()
         if (Prefs.mode == "xtream") loadXtream() else loadM3u()
         index = (live + movies + series).associateBy { it.key }
+        loadedIdentity = id
+        loadedAt = System.currentTimeMillis()
     }
 
     /** Items whose category the user hasn't hidden. */

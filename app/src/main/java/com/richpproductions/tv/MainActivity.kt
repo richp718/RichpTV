@@ -142,11 +142,11 @@ class MainActivity : AppCompatActivity() {
             refreshOnResume = true
             startActivity(Intent(this, CategoriesActivity::class.java))
         }
-        findViewById<Button>(R.id.btnReload).setOnClickListener { loadPlaylist() }
+        findViewById<Button>(R.id.btnReload).setOnClickListener { loadPlaylist(force = true) }
         btnFormat.setOnClickListener {
             Prefs.liveFormat = if (Prefs.liveFormat == "ts") "m3u8" else "ts"
             Toast.makeText(this, "Live format set to ${Prefs.liveFormat.uppercase()}. Reloading…", Toast.LENGTH_SHORT).show()
-            loadPlaylist()
+            loadPlaylist(force = true)
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -174,20 +174,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun openSetup() = setupLauncher.launch(Intent(this, SetupActivity::class.java))
 
-    private fun loadPlaylist() {
-        loaded = false
-        status.text = "Loading your playlist…\n\nBig playlists can take up to a minute."
-        status.visibility = View.VISIBLE
+    private fun showLoaded() {
+        loaded = true
+        status.visibility = View.GONE
+        selectSection(Section.LIVE, true)
+        navs[Section.LIVE]?.requestFocus()
+    }
+
+    /** Opens instantly from the saved copy; downloads only when needed. */
+    private fun loadPlaylist(force: Boolean = false) {
         lifecycleScope.launch {
+            if (!force && (Repo.isLoaded || Repo.loadCache(filesDir))) {
+                showLoaded()
+                val ageMs = System.currentTimeMillis() - Repo.loadedAt
+                if (ageMs > 12L * 3600 * 1000) {
+                    // refresh quietly in the background
+                    try { Repo.load(); Repo.saveCache(filesDir) } catch (e: Exception) { }
+                }
+                return@launch
+            }
+            loaded = false
+            status.text = "Loading your playlist…\n\nThis only happens the first time, or when you change or reload it."
+            status.visibility = View.VISIBLE
             try {
                 Repo.load()
-                loaded = true
-                status.visibility = View.GONE
-                selectSection(Section.LIVE, true)
-                navs[Section.LIVE]?.requestFocus()
+                Repo.saveCache(filesDir)
+                showLoaded()
             } catch (e: Exception) {
                 status.visibility = View.GONE
-                loaded = true
                 selectSection(Section.SETTINGS, true)
                 setInfo.text = "Couldn't load your playlist.\n\n${e.message ?: e.javaClass.simpleName}\n\n" + playlistInfo()
                 findViewById<Button>(R.id.btnPlaylist).requestFocus()
