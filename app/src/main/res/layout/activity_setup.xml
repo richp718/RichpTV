@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:orientation="horizontal">
+
+    <ScrollView
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.2">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="36dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Add your playlist"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="RichpTV is a player. Enter the M3U link or Xtream login from your TV provider."
+                android:textColor="@color/muted"
+                android:textSize="15sp" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Button android:id="@+id/btnXtream" style="@style/Btn" android:text="Xtream login" />
+                <Button android:id="@+id/btnM3u" style="@style/Btn" android:text="M3U link" />
+            </LinearLayout>
+
+            <EditText
+                android:id="@+id/m3uUrl"
+                style="@style/Field"
+                android:hint="http://provider.com/get.php?..."
+                android:inputType="textUri" />
+
+            <EditText
+                android:id="@+id/server"
+                style="@style/Field"
+                android:hint="Server  (example: http://myserver.com:8080)"
+                android:inputType="textUri" />
+
+            <EditText
+                android:id="@+id/user"
+                style="@style/Field"
+                android:hint="Username"
+                android:inputType="text" />
+
+            <EditText
+                android:id="@+id/pass"
+                style="@style/Field"
+                android:hint="Password"
+                android:inputType="textPassword" />
+
+            <Button android:id="@+id/save" style="@style/Btn" android:text="Save and load" />
+
+            <TextView
+                android:id="@+id/err"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:textColor="#FF6B6B"
+                android:textSize="15sp" />
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:background="@color/panel"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="28dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Easier: use your phone"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/qr"
+            android:layout_width="220dp"
+            android:layout_height="220dp"
+            android:layout_marginTop="16dp"
+            android:background="#FFFFFF"
+            android:padding="8dp" />
+
+        <TextView
+            android:id="@+id/phoneUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:textColor="@color/muted"
+            android:textSize="15sp" />
+    </LinearLayout>
+</LinearLayout>
