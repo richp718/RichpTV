@@ -17,6 +17,7 @@ class SetupActivity : AppCompatActivity() {
 
     private var mode = "xtream"
     private lateinit var m3u: EditText
+    private lateinit var epgUrl: EditText
     private lateinit var server: EditText
     private lateinit var user: EditText
     private lateinit var pass: EditText
@@ -30,6 +31,7 @@ class SetupActivity : AppCompatActivity() {
         Prefs.init(this)
         setContentView(R.layout.activity_setup)
         m3u = findViewById(R.id.m3uUrl)
+        epgUrl = findViewById(R.id.epgUrl)
         server = findViewById(R.id.server)
         user = findViewById(R.id.user)
         pass = findViewById(R.id.pass)
@@ -39,6 +41,7 @@ class SetupActivity : AppCompatActivity() {
 
         if (Prefs.mode == "m3u") mode = "m3u"
         m3u.setText(Prefs.m3uUrl)
+        epgUrl.setText(Prefs.epgUrl)
         server.setText(Prefs.server)
         user.setText(Prefs.user)
         pass.setText(Prefs.pass)
@@ -57,6 +60,7 @@ class SetupActivity : AppCompatActivity() {
         btnX.isSelected = m == "xtream"
         btnM.isSelected = m == "m3u"
         m3u.visibility = if (m == "m3u") View.VISIBLE else View.GONE
+        epgUrl.visibility = m3u.visibility
         val x = if (m == "xtream") View.VISIBLE else View.GONE
         server.visibility = x; user.visibility = x; pass.visibility = x
         err.text = ""
@@ -66,6 +70,7 @@ class SetupActivity : AppCompatActivity() {
         if (mode == "m3u") {
             if (m3u.text.isBlank()) { err.text = "Please enter your M3U link."; return }
             Prefs.m3uUrl = m3u.text.toString().trim()
+            Prefs.epgUrl = epgUrl.text.toString().trim()
         } else {
             if (server.text.isBlank() || user.text.isBlank()) { err.text = "Please enter the server and username."; return }
             Prefs.server = server.text.toString().trim()
@@ -86,6 +91,7 @@ class SetupActivity : AppCompatActivity() {
                 val m = form["mode"] ?: "xtream"
                 setMode(m)
                 form["m3u"]?.let { m3u.setText(it) }
+                form["epg"]?.let { epgUrl.setText(it) }
                 form["server"]?.let { server.setText(it) }
                 form["user"]?.let { user.setText(it) }
                 form["pass"]?.let { pass.setText(it) }

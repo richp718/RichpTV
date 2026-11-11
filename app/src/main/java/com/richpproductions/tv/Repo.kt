@@ -1,15 +1,27 @@
 package com.richpproductions.tv
 
 import android.util.Base64
+import android.util.Xml
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
+import org.xmlpull.v1.XmlPullParser
 
 object Repo {
     const val UA = "RichpTV/1.0 (Linux; Android)"
@@ -29,13 +41,31 @@ object Repo {
 
     /** Items the player is working through (channel list or episodes). */
     var queue: List<Item> = emptyList()
+        set(v) { field = v; queueSeriesKey = null }
+
+    /** Set when the queue is a series' episodes, so the player can remember progress. */
+    var queueSeriesKey: String? = null
 
     fun byKey(k: String): Item? = index[k]
 
     suspend fun load() = withContext(Dispatchers.IO) {
+        epgCache.clear()
+        xmltv = null
+        m3uEpgUrl = ""
         if (Prefs.mode == "xtream") loadXtream() else loadM3u()
         index = (live + movies + series).associateBy { it.key }
     }
+
+    /** Items whose category the user hasn't hidden. */
+    fun visible(list: List<Item>): List<Item> {
+        val kind = list.firstOrNull()?.kind ?: return list
+        val hid = Prefs.hidden(kind)
+        return if (hid.isEmpty()) list else list.filter { it.group !in hid }
+    }
+
+    /** Every category for a kind (hidden ones included), in the provider's order. */
+    fun allGroups(kind: Kind): List<Pair<String, Int>> = groups(
+        when (kind) { Kind.LIVE -> live; Kind.MOVIE -> movies; Kind.SERIES -> series })
 
     /** Categories with item counts, in the provider's order. */
     fun groups(list: List<Item>): List<Pair<String, Int>> {
@@ -94,7 +124,11 @@ object Repo {
             body.charStream().buffered().forEachLine { raw ->
                 val line = raw.trim()
                 when {
-                    line.startsWith("#EXTM3U", true) -> sawHeader = true
+                    line.startsWith("#EXTM3U", true) -> {
+                        sawHeader = true
+                        val a = ATTR.findAll(line).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
+                        m3uEpgUrl = (a["url-tvg"] ?: a["x-tvg-url"] ?: "").split(',').firstOrNull()?.trim() ?: ""
+                    }
                     line.startsWith("#EXTINF", true) -> {
                         sawHeader = true
                         val attrs = ATTR.findAll(line).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
@@ -196,38 +230,212 @@ object Repo {
         order = newOrder
     }
 
-    /** Seasons → episodes for an Xtream series. */
-    suspend fun seriesEpisodes(seriesId: String): List<Pair<String, List<Item>>> = withContext(Dispatchers.IO) {
+    // ---------------- Details (movie / series info) ----------------
+
+    private fun firstString(o: JSONObject, vararg keys: String): String {
+        for (k in keys) {
+            if (o.isNull(k)) continue
+            val a = o.optJSONArray(k)
+            if (a != null) { if (a.length() > 0) { val v = a.optString(0, ""); if (v.isNotBlank()) return v }; continue }
+            val v = o.optString(k, "")
+            if (v.isNotBlank()) return v
+        }
+        return ""
+    }
+
+    private fun prettyDuration(raw: String, secs: String = ""): String {
+        var total = secs.toLongOrNull() ?: 0L
+        if (total <= 0 && raw.contains(":")) {
+            val p = raw.split(":").mapNotNull { it.trim().toLongOrNull() }
+            total = when (p.size) { 3 -> p[0] * 3600 + p[1] * 60 + p[2]; 2 -> p[0] * 60 + p[1]; else -> 0 }
+        }
+        if (total <= 0) {
+            val mins = raw.filter { it.isDigit() }.toLongOrNull() ?: return ""
+            total = mins * 60
+        }
+        val h = total / 3600; val m = (total % 3600) / 60
+        return if (h > 0) "${h}h ${m}m" else "${m}m"
+    }
+
+    private fun metaLine(year: String, genre: String, duration: String, rating: String): String {
+        val r = rating.toDoubleOrNull()?.takeIf { it > 0 }?.let { "★ " + String.format(Locale.US, "%.1f", it) } ?: ""
+        return listOf(year.take(4), genre, duration, r).filter { it.isNotBlank() }.joinToString("   ·   ")
+    }
+
+    private fun basicDetails(item: Item) = Details(item.name, item.logo, null,
+        "No description was provided for this title.", item.group, "")
+
+    suspend fun movieDetails(item: Item): Details = withContext(Dispatchers.IO) {
+        if (!isXtream || item.streamId == null) return@withContext basicDetails(item)
+        try {
+            val o = JSONObject(fetch(api("get_vod_info", "&vod_id=${item.streamId}")))
+            val info = o.optJSONObject("info") ?: return@withContext basicDetails(item)
+            val plot = firstString(info, "plot", "description").ifBlank { "No description was provided for this title." }
+            val cast = firstString(info, "cast", "actors")
+            val dir = firstString(info, "director")
+            Details(
+                title = firstString(info, "name", "o_name").ifBlank { item.name },
+                poster = firstString(info, "movie_image", "cover_big").ifBlank { item.logo ?: "" }.ifBlank { null },
+                backdrop = firstString(info, "backdrop_path").ifBlank { null },
+                plot = plot,
+                meta = metaLine(firstString(info, "releasedate", "release_date", "year"), firstString(info, "genre"),
+                    prettyDuration(firstString(info, "duration"), firstString(info, "duration_secs")), firstString(info, "rating")),
+                cast = listOf(if (cast.isNotBlank()) "Cast: $cast" else "", if (dir.isNotBlank()) "Director: $dir" else "")
+                    .filter { it.isNotBlank() }.joinToString("\n")
+            )
+        } catch (e: Exception) { basicDetails(item) }
+    }
+
+    /** Series info plus seasons → episodes (Xtream). */
+    suspend fun seriesDetails(item: Item): Pair<Details, List<Pair<String, List<Item>>>> = withContext(Dispatchers.IO) {
+        val seriesId = item.seriesId ?: return@withContext basicDetails(item) to emptyList()
         val o = JSONObject(fetch(api("get_series_info", "&series_id=$seriesId")))
-        val eps = o.optJSONObject("episodes") ?: return@withContext emptyList()
+        val info = o.optJSONObject("info") ?: JSONObject()
+        val cast = firstString(info, "cast")
+        val details = Details(
+            title = firstString(info, "name").ifBlank { item.name },
+            poster = firstString(info, "cover").ifBlank { item.logo ?: "" }.ifBlank { null },
+            backdrop = firstString(info, "backdrop_path").ifBlank { null },
+            plot = firstString(info, "plot").ifBlank { "No description was provided for this series." },
+            meta = metaLine(firstString(info, "releaseDate", "release_date"), firstString(info, "genre"), "", firstString(info, "rating")),
+            cast = if (cast.isNotBlank()) "Cast: $cast" else ""
+        )
+        val eps = o.optJSONObject("episodes") ?: return@withContext details to emptyList()
         val b = base(); val user = u(); val pass = p()
-        eps.keys().asSequence().toList().sortedBy { it.toIntOrNull() ?: 0 }.map { season ->
+        val seasons = eps.keys().asSequence().toList().sortedBy { it.toIntOrNull() ?: 0 }.map { season ->
             val a = eps.optJSONArray(season) ?: JSONArray()
             val list = (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { e ->
                 val id = js(e, "id")
                 val ext = js(e, "container_extension").ifBlank { "mp4" }
                 val num = js(e, "episode_num")
-                val info = e.optJSONObject("info") ?: JSONObject()
-                Item("E:$id", "Episode $num  ·  ${js(e, "title")}", js(info, "movie_image").ifBlank { null },
-                    "Season $season", "$b/series/$user/$pass/$id.$ext", Kind.MOVIE)
+                val ei = e.optJSONObject("info") ?: JSONObject()
+                val dur = prettyDuration(firstString(ei, "duration"), firstString(ei, "duration_secs"))
+                val title = js(e, "title").ifBlank { "Episode $num" }
+                Item("E:$id", "E$num   ·   $title" + (if (dur.isNotBlank()) "   ·   $dur" else ""),
+                    firstString(ei, "movie_image").ifBlank { null }, "Season $season",
+                    "$b/series/$user/$pass/$id.$ext", Kind.MOVIE)
             }
             "Season $season" to list
         }.filter { it.second.isNotEmpty() }
+        details to seasons
     }
 
-    /** Now / next programme for an Xtream live channel. */
-    suspend fun nowNext(streamId: String): List<EpgEntry> = withContext(Dispatchers.IO) {
+    // ---------------- TV guide ----------------
+
+    private val epgCache = ConcurrentHashMap<String, List<EpgEntry>>()
+    private val epgGate = Semaphore(4)
+    @Volatile private var m3uEpgUrl = ""
+    @Volatile private var xmltv: Map<String, List<EpgEntry>>? = null
+    private val xmltvLock = Mutex()
+
+    val hasGuide: Boolean get() = isXtream || Prefs.epgUrl.isNotBlank() || m3uEpgUrl.isNotBlank()
+
+    fun epgCached(item: Item): List<EpgEntry>? = epgCache[item.key]
+
+    /** Programmes for a live channel, from now on (cached). */
+    suspend fun epg(item: Item): List<EpgEntry> {
+        epgCache[item.key]?.let { return it }
+        val list = epgGate.withPermit {
+            if (isXtream && item.streamId != null) shortEpg(item.streamId) else xmltvFor(item)
+        }
+        val now = System.currentTimeMillis() / 1000
+        val upcoming = list.filter { it.end > now }.sortedBy { it.start }
+        epgCache[item.key] = upcoming
+        return upcoming
+    }
+
+    private suspend fun shortEpg(streamId: String): List<EpgEntry> = withContext(Dispatchers.IO) {
         try {
-            val o = JSONObject(fetch(api("get_short_epg", "&stream_id=$streamId&limit=2")))
+            val o = JSONObject(fetch(api("get_short_epg", "&stream_id=$streamId&limit=12")))
             val a = o.optJSONArray("epg_listings") ?: return@withContext emptyList()
             (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { e ->
                 EpgEntry(b64(js(e, "title")),
                     js(e, "start_timestamp").toLongOrNull() ?: 0L,
-                    js(e, "stop_timestamp").toLongOrNull() ?: 0L)
+                    js(e, "stop_timestamp").toLongOrNull() ?: 0L,
+                    b64(js(e, "description")))
             }
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    private suspend fun xmltvFor(item: Item): List<EpgEntry> {
+        val id = item.epgId?.takeIf { it.isNotBlank() } ?: return emptyList()
+        val m = loadXmltv()
+        return m[id] ?: m[id.lowercase()] ?: emptyList()
+    }
+
+    private suspend fun loadXmltv(): Map<String, List<EpgEntry>> = xmltvLock.withLock {
+        xmltv?.let { return@withLock it }
+        var url = Prefs.epgUrl.ifBlank { m3uEpgUrl }.trim()
+        if (url.isBlank()) return@withLock emptyMap()
+        if (!url.startsWith("http", true)) url = "http://$url"
+        val parsed = withContext(Dispatchers.IO) {
+            try { parseXmltv(url) } catch (e: Exception) { emptyMap() }
+        }
+        xmltv = parsed
+        parsed
+    }
+
+    private fun parseXmltv(url: String): Map<String, List<EpgEntry>> {
+        val wanted = HashSet<String>()
+        for (c in live) c.epgId?.takeIf { it.isNotBlank() }?.let { wanted.add(it); wanted.add(it.lowercase()) }
+        val fmtZ = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
+        val fmt = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+        fun t(s: String?): Long {
+            val v = s?.trim() ?: return 0L
+            return try { fmtZ.parse(v)!!.time / 1000 } catch (e: Exception) {
+                try { fmt.parse(v.take(14))!!.time / 1000 } catch (e2: Exception) { 0L }
+            }
+        }
+        val now = System.currentTimeMillis() / 1000
+        val from = now - 3 * 3600
+        val to = now + 14 * 3600
+        val map = HashMap<String, ArrayList<EpgEntry>>()
+        val req = Request.Builder().url(url).header("User-Agent", UA).build()
+        http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) return emptyMap()
+            var input: InputStream = BufferedInputStream(r.body!!.byteStream())
+            input.mark(4)
+            val b1 = input.read(); val b2 = input.read()
+            input.reset()
+            if (b1 == 0x1f && b2 == 0x8b) input = GZIPInputStream(input)
+            val parser = Xml.newPullParser()
+            parser.setInput(input, null)
+            var ch: String? = null
+            var start = 0L; var stop = 0L
+            var title = ""; var desc = ""; var tag = ""
+            var ev = parser.eventType
+            while (ev != XmlPullParser.END_DOCUMENT) {
+                when (ev) {
+                    XmlPullParser.START_TAG -> {
+                        tag = parser.name
+                        if (tag == "programme") {
+                            ch = parser.getAttributeValue(null, "channel")
+                            start = t(parser.getAttributeValue(null, "start"))
+                            stop = t(parser.getAttributeValue(null, "stop"))
+                            title = ""; desc = ""
+                        }
+                    }
+                    XmlPullParser.TEXT -> if (ch != null) {
+                        if (tag == "title" && title.isEmpty()) title = parser.text ?: ""
+                        else if (tag == "desc" && desc.isEmpty()) desc = parser.text ?: ""
+                    }
+                    XmlPullParser.END_TAG -> {
+                        if (parser.name == "programme") {
+                            val c = ch
+                            if (c != null && (c in wanted) && stop > from && start < to)
+                                map.getOrPut(c) { ArrayList() }.add(EpgEntry(title.trim(), start, stop, desc.trim()))
+                            ch = null
+                        }
+                        tag = ""
+                    }
+                }
+                ev = parser.next()
+            }
+        }
+        for (l in map.values) l.sortBy { it.start }
+        return map
     }
 
     private fun b64(s: String): String = try {

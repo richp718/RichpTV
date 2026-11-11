@@ -33,6 +33,34 @@ object Prefs {
         get() = str("liveFormat", "ts")
         set(v) = put("liveFormat", v)
 
+    var epgUrl: String
+        get() = str("epgUrl")
+        set(v) = put("epgUrl", v)
+
+    // ----- hidden categories -----
+    private val hiddenCache = HashMap<Kind, MutableSet<String>>()
+
+    fun hidden(kind: Kind): Set<String> =
+        hiddenCache.getOrPut(kind) { (sp.getStringSet("hid_" + kind.name, emptySet()) ?: emptySet()).toMutableSet() }
+
+    fun setHidden(kind: Kind, groups: Set<String>) {
+        hiddenCache[kind] = groups.toMutableSet()
+        sp.edit().putStringSet("hid_" + kind.name, HashSet(groups)).apply()
+    }
+
+    fun toggleHidden(kind: Kind, group: String): Boolean {
+        val s = hidden(kind).toMutableSet()
+        val nowHidden = if (s.remove(group)) false else { s.add(group); true }
+        setHidden(kind, s)
+        return nowHidden
+    }
+
+    fun isHidden(item: Item) = hidden(item.kind).contains(item.group)
+
+    // ----- last episode watched per series -----
+    fun lastEpisode(seriesKey: String): String = str("last_$seriesKey")
+    fun setLastEpisode(seriesKey: String, episodeKey: String) = put("last_$seriesKey", episodeKey)
+
     val hasPlaylist: Boolean
         get() = (mode == "m3u" && m3uUrl.isNotBlank()) ||
                 (mode == "xtream" && server.isNotBlank() && user.isNotBlank())

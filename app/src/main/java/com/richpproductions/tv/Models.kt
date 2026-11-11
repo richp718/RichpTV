@@ -14,4 +14,13 @@ data class Item(
     val epgId: String? = null
 )
 
-data class EpgEntry(val title: String, val start: Long, val end: Long)
+data class EpgEntry(val title: String, val start: Long, val end: Long, val desc: String = "")
+
+data class Details(
+    val title: String,
+    val poster: String?,
+    val backdrop: String?,
+    val plot: String,
+    val meta: String,
+    val cast: String
+)

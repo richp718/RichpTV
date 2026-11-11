@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private var epgJob: Job? = null
     private var searchJob: Job? = null
     private var loaded = false
+    private var refreshOnResume = false
 
     private val time = SimpleDateFormat("h:mm a", Locale.US)
 
@@ -86,6 +87,10 @@ class MainActivity : AppCompatActivity() {
         setInfo = findViewById(R.id.setInfo)
         btnFormat = findViewById(R.id.btnFormat)
 
+        findViewById<TextView>(R.id.navGuide).setOnClickListener {
+            if (loaded) startActivity(Intent(this, GuideActivity::class.java))
+        }
+
         for ((s, v) in navs) {
             v.setOnFocusChangeListener { _, f -> if (f && loaded) selectSection(s) }
             v.setOnClickListener {
@@ -109,7 +114,8 @@ class MainActivity : AppCompatActivity() {
                 catAdapter.select(i)
                 showCategory(i)
                 focusGrid()
-            }
+            },
+            onLong = { i -> hideCategory(i) }
         )
         cats.layoutManager = LinearLayoutManager(this)
         cats.itemAnimator = null
@@ -132,6 +138,10 @@ class MainActivity : AppCompatActivity() {
         })
 
         findViewById<Button>(R.id.btnPlaylist).setOnClickListener { openSetup() }
+        findViewById<Button>(R.id.btnCats).setOnClickListener {
+            refreshOnResume = true
+            startActivity(Intent(this, CategoriesActivity::class.java))
+        }
         findViewById<Button>(R.id.btnReload).setOnClickListener { loadPlaylist() }
         btnFormat.setOnClickListener {
             Prefs.liveFormat = if (Prefs.liveFormat == "ts") "m3u8" else "ts"
@@ -156,8 +166,10 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // refresh favourite stars after returning from the player
-        if (loaded && section == Section.FAVS) selectSection(Section.FAVS, true)
-        else { rowAdapter.notifyDataSetChanged(); posterAdapter.notifyDataSetChanged() }
+        if (loaded && (section == Section.FAVS || refreshOnResume)) {
+            refreshOnResume = false
+            section?.let { selectSection(it, true) }
+        } else { rowAdapter.notifyDataSetChanged(); posterAdapter.notifyDataSetChanged() }
     }
 
     private fun openSetup() = setupLauncher.launch(Intent(this, SetupActivity::class.java))
@@ -194,9 +206,9 @@ class MainActivity : AppCompatActivity() {
         search.visibility = if (s == Section.SEARCH) View.VISIBLE else View.GONE
         cats.visibility = if (s == Section.SEARCH || s == Section.SETTINGS) View.GONE else View.VISIBLE
         when (s) {
-            Section.LIVE -> setCats(Repo.live)
-            Section.MOVIES -> setCats(Repo.movies)
-            Section.SERIES -> setCats(Repo.series)
+            Section.LIVE -> setCats(Repo.visible(Repo.live))
+            Section.MOVIES -> setCats(Repo.visible(Repo.movies))
+            Section.SERIES -> setCats(Repo.visible(Repo.series))
             Section.FAVS -> setFavCats()
             Section.SEARCH -> doSearch(search.text.toString().trim())
             Section.SETTINGS -> updateSettings()
@@ -261,7 +273,7 @@ class MainActivity : AppCompatActivity() {
         searchJob = lifecycleScope.launch {
             val results = withContext(Dispatchers.Default) {
                 (Repo.live.asSequence() + Repo.movies.asSequence() + Repo.series.asSequence())
-                    .filter { it.name.contains(q, ignoreCase = true) }
+                    .filter { it.name.contains(q, ignoreCase = true) && !Prefs.isHidden(it) }
                     .take(500).toList()
             }
             showItems("Results for \"$q\"", results)
@@ -270,11 +282,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun onItemClick(pos: Int) {
         val item = shown.getOrNull(pos) ?: return
-        if (item.kind == Kind.SERIES && item.seriesId != null) {
-            startActivity(Intent(this, SeriesActivity::class.java)
-                .putExtra("id", item.seriesId)
-                .putExtra("name", item.name)
-                .putExtra("cover", item.logo))
+        if (item.kind != Kind.LIVE && Repo.byKey(item.key) != null) {
+            startActivity(Intent(this, DetailActivity::class.java).putExtra("key", item.key))
             return
         }
         if (item.url == null) return
@@ -294,10 +303,10 @@ class MainActivity : AppCompatActivity() {
     private fun onItemFocus(pos: Int) {
         val item = shown.getOrNull(pos) ?: return
         epgJob?.cancel()
-        if (item.kind != Kind.LIVE || !Repo.isXtream || item.streamId == null) { epg.visibility = View.GONE; return }
+        if (item.kind != Kind.LIVE || !Repo.hasGuide) { epg.visibility = View.GONE; return }
         epgJob = lifecycleScope.launch {
             delay(450)
-            val list = Repo.nowNext(item.streamId)
+            val list = Repo.epg(item).take(2)
             if (list.isEmpty()) { epg.visibility = View.GONE; return@launch }
             epg.text = list.mapIndexed { i, e ->
                 val label = if (i == 0) "NOW" else "NEXT"
@@ -306,6 +315,25 @@ class MainActivity : AppCompatActivity() {
             }.joinToString("\n")
             epg.visibility = View.VISIBLE
         }
+    }
+
+    private fun hideCategory(i: Int) {
+        val kind = when (section) {
+            Section.LIVE -> Kind.LIVE; Section.MOVIES -> Kind.MOVIE; Section.SERIES -> Kind.SERIES
+            else -> return
+        }
+        if (i == 0) {
+            Toast.makeText(this, "To hide many at once, go to Settings → Choose categories", Toast.LENGTH_LONG).show()
+            return
+        }
+        val name = catAdapter.cats.getOrNull(i)?.first ?: return
+        Prefs.toggleHidden(kind, name)
+        Toast.makeText(this, "Hid \"$name\". Undo in Settings → Choose categories.", Toast.LENGTH_LONG).show()
+        val keep = (i - 1).coerceAtLeast(0)
+        selectSection(section!!, true)
+        catAdapter.select(keep.coerceAtMost(catAdapter.itemCount - 1).coerceAtLeast(0))
+        showCategory(catAdapter.selected)
+        focusCats()
     }
 
     private fun playlistInfo(): String {

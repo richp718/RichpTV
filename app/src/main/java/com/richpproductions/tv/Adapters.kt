@@ -10,7 +10,8 @@ import coil.load
 
 class CatAdapter(
     private val onFocus: (Int) -> Unit,
-    private val onClick: (Int) -> Unit
+    private val onClick: (Int) -> Unit,
+    private val onLong: ((Int) -> Unit)? = null
 ) : RecyclerView.Adapter<CatAdapter.VH>() {
 
     var cats: List<Pair<String, Int>> = emptyList()
@@ -23,6 +24,11 @@ class CatAdapter(
     fun set(list: List<Pair<String, Int>>, sel: Int = 0) {
         cats = list; selected = sel
         notifyDataSetChanged()
+    }
+
+    /** Change the text of the rows without rebuilding the list (keeps focus). */
+    fun replaceLabels(list: List<Pair<String, Int>>) {
+        cats = list
     }
 
     fun select(i: Int) {
@@ -45,6 +51,11 @@ class CatAdapter(
         t.setOnClickListener {
             val p = h.bindingAdapterPosition
             if (p != RecyclerView.NO_POSITION) onClick(p)
+        }
+        t.setOnLongClickListener {
+            val p = h.bindingAdapterPosition
+            val cb = onLong
+            if (cb != null && p != RecyclerView.NO_POSITION) { cb(p); true } else false
         }
         return h
     }

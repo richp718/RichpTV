@@ -28,6 +28,7 @@
         <TextView android:id="@+id/navLive" style="@style/NavItem" android:text="📺  Live TV" />
         <TextView android:id="@+id/navMovies" style="@style/NavItem" android:text="🎬  Movies" />
         <TextView android:id="@+id/navSeries" style="@style/NavItem" android:text="🎞  Series" />
+        <TextView android:id="@+id/navGuide" style="@style/NavItem" android:text="📅  TV Guide" />
         <TextView android:id="@+id/navFavs" style="@style/NavItem" android:text="★  Favorites" />
         <TextView android:id="@+id/navSearch" style="@style/NavItem" android:text="🔍  Search" />
         <TextView android:id="@+id/navSettings" style="@style/NavItem" android:text="⚙  Settings" />
@@ -126,6 +127,7 @@
                     android:textSize="16sp" />
 
                 <Button android:id="@+id/btnPlaylist" style="@style/Btn" android:text="Change playlist" />
+                <Button android:id="@+id/btnCats" style="@style/Btn" android:text="Choose categories (hide countries)" />
                 <Button android:id="@+id/btnReload" style="@style/Btn" android:text="Reload playlist" />
                 <Button android:id="@+id/btnFormat" style="@style/Btn" android:text="Live stream format" />
 
@@ -133,7 +135,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="24dp"
-                    android:text="Tips: hold OK on any channel or movie to add it to Favorites. While watching live TV, press Up / Down to change channels."
+                    android:text="Tips: hold OK on any channel to add it to Favorites. Hold OK on a category to hide it. While watching live TV, press Up / Down to change channels."
                     android:textColor="@color/muted"
                     android:textSize="14sp" />
             </LinearLayout>

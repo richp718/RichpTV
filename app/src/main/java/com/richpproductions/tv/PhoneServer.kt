@@ -97,7 +97,8 @@ button{margin-top:24px;width:100%;padding:16px;font-size:18px;border:0;border-ra
 <div id="x"><label>Server</label><input type="url" name="server" placeholder="http://myserver.com:8080">
 <label>Username</label><input type="text" name="user" autocapitalize="off" autocorrect="off">
 <label>Password</label><input type="password" name="pass"></div>
-<div id="m" style="display:none"><label>M3U link</label><input type="url" name="m3u" placeholder="http://..."></div>
+<div id="m" style="display:none"><label>M3U link</label><input type="url" name="m3u" placeholder="http://...">
+<label>TV guide link (optional)</label><input type="url" name="epg" placeholder="http://.../epg.xml"></div>
 <button type="submit">Send to TV</button></form>
 <script>function sw(){var m=document.querySelector('input[name=mode]:checked').value;document.getElementById('x').style.display=m=='xtream'?'block':'none';document.getElementById('m').style.display=m=='m3u'?'block':'none';}</script>
 </body></html>"""

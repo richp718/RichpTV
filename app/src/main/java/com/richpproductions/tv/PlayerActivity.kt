@@ -90,7 +90,7 @@ class PlayerActivity : AppCompatActivity() {
         val url = item.url ?: return
         index = i
         triedHls = forceHls
-        Prefs.addRecent(item.key)
+        Repo.queueSeriesKey?.let { Prefs.setLastEpisode(it, item.key); Prefs.addRecent(it) } ?: Prefs.addRecent(item.key)
         val b = MediaItem.Builder()
             .setUri(url)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(item.name).build())
