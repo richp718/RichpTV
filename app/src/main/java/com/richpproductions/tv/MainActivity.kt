@@ -155,6 +155,8 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, CategoriesActivity::class.java))
         }
         findViewById<Button>(R.id.btnReload).setOnClickListener { loadPlaylist(force = true) }
+        findViewById<Button>(R.id.btnCopyTo).setOnClickListener { Transfer.showSend(this) }
+        findViewById<Button>(R.id.btnCopyFrom).setOnClickListener { Transfer.showReceive(this) { loadPlaylist(force = true) } }
         btnFormat.setOnClickListener {
             Prefs.liveFormat = if (Prefs.liveFormat == "ts") "m3u8" else "ts"
             Toast.makeText(this, "Live format set to ${Prefs.liveFormat.uppercase()}. Reloading…", Toast.LENGTH_SHORT).show()

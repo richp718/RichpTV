@@ -74,6 +74,47 @@ object Prefs {
     fun lastEpisode(seriesKey: String): String = str("last_$seriesKey")
     fun setLastEpisode(seriesKey: String, episodeKey: String) = put("last_$seriesKey", episodeKey)
 
+    // ----- copy everything to another device -----
+    /** Every saved setting (playlist login, hidden categories/channels, favorites, watch spots…) as JSON. */
+    fun exportAll(): org.json.JSONObject {
+        val out = org.json.JSONObject()
+        for ((k, v) in sp.all) {
+            val e = org.json.JSONObject()
+            when (v) {
+                is String -> { e.put("t", "s"); e.put("v", v) }
+                is Set<*> -> { e.put("t", "set"); e.put("v", org.json.JSONArray(v.map { it.toString() })) }
+                is Long -> { e.put("t", "l"); e.put("v", v) }
+                is Int -> { e.put("t", "i"); e.put("v", v) }
+                is Boolean -> { e.put("t", "b"); e.put("v", v) }
+                is Float -> { e.put("t", "f"); e.put("v", v.toDouble()) }
+                else -> continue
+            }
+            out.put(k, e)
+        }
+        return org.json.JSONObject().put("app", "RichpTV").put("v", 1).put("prefs", out)
+    }
+
+    /** Replace this device's settings with the ones from [json]. */
+    fun importAll(json: org.json.JSONObject) {
+        val prefs = json.getJSONObject("prefs")
+        val ed = sp.edit().clear()
+        for (k in prefs.keys()) {
+            val e = prefs.getJSONObject(k)
+            when (e.optString("t")) {
+                "s" -> ed.putString(k, e.getString("v"))
+                "set" -> { val a = e.getJSONArray("v"); ed.putStringSet(k, (0 until a.length()).map { a.getString(it) }.toHashSet()) }
+                "l" -> ed.putLong(k, e.getLong("v"))
+                "i" -> ed.putInt(k, e.getInt("v"))
+                "b" -> ed.putBoolean(k, e.getBoolean("v"))
+                "f" -> ed.putFloat(k, e.getDouble("v").toFloat())
+            }
+        }
+        ed.commit()
+        favCache = null
+        hiddenCache.clear()
+        hidChCache = null
+    }
+
     val hasPlaylist: Boolean
         get() = (mode == "m3u" && m3uUrl.isNotBlank()) ||
                 (mode == "xtream" && server.isNotBlank() && user.isNotBlank())

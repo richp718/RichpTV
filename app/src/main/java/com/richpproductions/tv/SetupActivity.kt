@@ -50,6 +50,9 @@ class SetupActivity : AppCompatActivity() {
         btnX.setOnClickListener { setMode("xtream") }
         btnM.setOnClickListener { setMode("m3u") }
         findViewById<Button>(R.id.save).setOnClickListener { save() }
+        findViewById<Button>(R.id.copyFrom).setOnClickListener {
+            Transfer.showReceive(this) { setResult(RESULT_OK); finish() }
+        }
 
         startPhoneServer()
         btnX.requestFocus()
