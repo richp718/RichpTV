@@ -91,6 +91,11 @@ class SetupActivity : AppCompatActivity() {
         val ip = PhoneServer.localIp()
         val s = PhoneServer { form ->
             runOnUiThread {
+                form["backup"]?.let { b ->
+                    if (Transfer.restoreText(b)) { setResult(RESULT_OK); finish() }
+                    else err.text = "That setup file didn't work. Try saving it again from the other TV."
+                    return@runOnUiThread
+                }
                 val m = form["mode"] ?: "xtream"
                 setMode(m)
                 form["m3u"]?.let { m3u.setText(it) }
@@ -108,15 +113,8 @@ class SetupActivity : AppCompatActivity() {
         }
         phone = s
         val url = "http://$ip:${s.port}"
-        urlView.text = "Scan with your phone camera, or open\n$url\n(phone and TV on the same Wi-Fi)"
-        qr.setImageBitmap(makeQr(url, 400))
-    }
-
-    private fun makeQr(text: String, size: Int): Bitmap {
-        val m = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 1))
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-        for (x in 0 until size) for (y in 0 until size) bmp.setPixel(x, y, if (m[x, y]) Color.BLACK else Color.WHITE)
-        return bmp
+        urlView.text = "Scan with your phone camera, or open\n$url\n(phone and TV on the same Wi-Fi)\n\nGot a setup file from another TV? Scan this too, then choose the file."
+        qr.setImageBitmap(Transfer.qr(url, 400))
     }
 
     override fun onDestroy() {

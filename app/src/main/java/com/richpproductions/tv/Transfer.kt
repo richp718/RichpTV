@@ -1,8 +1,12 @@
 package com.richpproductions.tv
 
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.text.InputType
 import android.view.Gravity
 import android.widget.EditText
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -13,6 +17,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import org.json.JSONObject
 import java.net.ServerSocket
 import java.net.Socket
@@ -26,9 +33,26 @@ import kotlin.random.Random
  *
  * Old TV: Settings → Copy to another TV → shows a code like "45-4821".
  * New TV: Copy from another TV → type that code → everything comes over and the playlist loads.
+ *
+ * Different house: scan the QR on the old TV to save a setup file on the phone,
+ * then at the other house scan the new TV's QR and pick that file.
  */
 object Transfer {
     private val PORTS = 8097..8100
+
+    fun qr(text: String, size: Int): Bitmap {
+        val m = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, mapOf(EncodeHintType.MARGIN to 1))
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
+        for (x in 0 until size) for (y in 0 until size) bmp.setPixel(x, y, if (m[x, y]) Color.BLACK else Color.WHITE)
+        return bmp
+    }
+
+    /** Restore from the text of a setup file. True if it worked. */
+    fun restoreText(text: String): Boolean = try {
+        val j = JSONObject(text.trim())
+        if (j.optString("app") != "RichpTV" || !j.has("prefs")) false
+        else { Prefs.importAll(j); true }
+    } catch (_: Exception) { false }
 
     // ---------------- sending side ----------------
 
@@ -55,10 +79,12 @@ object Transfer {
                 c.soTimeout = 15000
                 val first = c.getInputStream().bufferedReader().readLine() ?: return
                 val ok = first.startsWith("GET /richptv-backup?pin=$pin ") || first.startsWith("GET /richptv-backup?pin=$pin&")
-                val body = (if (ok) Prefs.exportAll().toString() else """{"error":"wrong code"}""").toByteArray(Charsets.UTF_8)
+                val download = ok && first.contains("&file=1")
+                val body = (if (ok) Prefs.exportAll().toString(1) else """{"error":"wrong code"}""").toByteArray(Charsets.UTF_8)
                 val out = c.getOutputStream()
+                val disp = if (download) "Content-Disposition: attachment; filename=\"RichpTV-setup.json\"\r\n" else ""
                 out.write(("HTTP/1.1 ${if (ok) "200 OK" else "403 Forbidden"}\r\nContent-Type: application/json; charset=utf-8\r\n" +
-                        "Content-Length: ${body.size}\r\nConnection: close\r\n\r\n").toByteArray())
+                        disp + "Content-Length: ${body.size}\r\nConnection: close\r\n\r\n").toByteArray())
                 out.write(body)
                 out.flush()
             } catch (_: Exception) {
@@ -81,15 +107,33 @@ object Transfer {
         val last = ip.substringAfterLast('.')
         val portPart = if (server.port == PORTS.first) "" else "-${server.port - PORTS.first + 1}"
         val code = "$last-$pin$portPart"
-        val msg = TextView(a).apply {
-            text = "On the other TV, open RichpTV and choose\n\"Copy from another TV\", then enter:\n\n$code\n\n" +
-                   "Keep this box open until it finishes.\nBoth TVs must be on the same Wi-Fi.\n\n(Full address if asked: $ip)"
-            textSize = 20f
+        val fileUrl = "http://$ip:${server.port}/richptv-backup?pin=$pin&file=1"
+        val same = TextView(a).apply {
+            text = "SAME HOUSE\n\nOn the other TV choose\n\"Copy from another TV\" and enter:\n\n$code\n\n(Full address if asked: $ip)"
+            textSize = 18f
             gravity = Gravity.CENTER
-            setPadding(48, 40, 48, 20)
+        }
+        val qrImg = ImageView(a).apply { setImageBitmap(qr(fileUrl, 360)) }
+        val other = TextView(a).apply {
+            text = "ANOTHER HOUSE\n\nScan with your phone to save a\nsetup file. Take it (or text it)\nto the other house."
+            textSize = 18f
+            gravity = Gravity.CENTER
+        }
+        val otherCol = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(other)
+            addView(qrImg, LinearLayout.LayoutParams(360, 360).apply { topMargin = 16 })
+        }
+        val msg = LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(40, 30, 40, 10)
+            addView(same, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(otherCol, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
         AlertDialog.Builder(a)
-            .setTitle("Copy to another TV")
+            .setTitle("Copy to another TV  ·  keep this open until it's done")
             .setView(msg)
             .setPositiveButton("Done", null)
             .setOnDismissListener { server.stop() }
@@ -106,14 +150,43 @@ object Transfer {
             textSize = 22f
             setSingleLine()
         }
-        val box = android.widget.FrameLayout(a).apply { setPadding(48, 24, 48, 0); addView(input) }
-        AlertDialog.Builder(a)
-            .setTitle("Copy from another TV")
-            .setMessage("On your other TV go to Settings → Copy to another TV, then type the code it shows. " +
-                        "This replaces the setup on this TV.")
-            .setView(box)
+        val box = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 0)
+            addView(TextView(a).apply {
+                text = "SAME HOUSE: on your other TV go to Settings → Copy to another TV, then type the code it shows."
+                textSize = 16f
+            })
+            addView(input)
+        }
+        // Another house: the phone uploads the setup file through this TV's phone page.
+        var dialog: AlertDialog? = null
+        val phone = PhoneServer { form ->
+            a.runOnUiThread {
+                val b = form["backup"] ?: return@runOnUiThread
+                if (restoreText(b)) {
+                    dialog?.dismiss()
+                    Toast.makeText(a, "✓ Copied! Loading your channels…", Toast.LENGTH_LONG).show()
+                    onDone()
+                } else Toast.makeText(a, "That setup file didn't work.", Toast.LENGTH_LONG).show()
+            }
+        }
+        val ip = PhoneServer.localIp()
+        if (ip != null && phone.start()) {
+            val url = "http://$ip:${phone.port}"
+            box.addView(TextView(a).apply {
+                text = "\nANOTHER HOUSE: scan this with the phone that has the setup file, then tap \"Choose setup file\".  ($url)"
+                textSize = 16f
+            })
+            box.addView(ImageView(a).apply { setImageBitmap(qr(url, 300)) },
+                LinearLayout.LayoutParams(300, 300).apply { topMargin = 10; gravity = Gravity.CENTER_HORIZONTAL })
+        }
+        dialog = AlertDialog.Builder(a)
+            .setTitle("Copy from another TV  ·  replaces this TV's setup")
+            .setView(android.widget.ScrollView(a).apply { addView(box) })
             .setPositiveButton("Copy") { _, _ -> fetch(a, input.text.toString(), onDone) }
             .setNegativeButton("Cancel", null)
+            .setOnDismissListener { phone.stop() }
             .show()
         input.requestFocus()
     }

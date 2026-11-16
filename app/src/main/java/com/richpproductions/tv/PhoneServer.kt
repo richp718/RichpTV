@@ -99,11 +99,20 @@ button{margin-top:24px;width:100%;padding:16px;font-size:18px;border:0;border-ra
 <label>Password</label><input type="password" name="pass"></div>
 <div id="m" style="display:none"><label>M3U link</label><input type="url" name="m3u" placeholder="http://...">
 <label>TV guide link (optional)</label><input type="url" name="epg" placeholder="http://.../epg.xml"></div>
+<input type="hidden" name="backup" id="bk" disabled>
 <button type="submit">Send to TV</button></form>
+<h1 style="margin-top:40px">Have a setup file?</h1>
+<p>If you saved a RichpTV setup file from another TV, pick it here. It copies everything: playlist, hidden channels, favorites.</p>
+<label style="display:block;padding:16px;border-radius:28px;background:#273046;text-align:center;color:#fff;font-size:18px">Choose setup file
+<input type="file" id="f" accept=".json,application/json,text/plain" style="display:none" onchange="up(this)"></label>
+<p id="st"></p>
+<script>function up(i){var f=i.files[0];if(!f)return;var r=new FileReader();r.onload=function(){var t=r.result;
+if(t.indexOf('"RichpTV"')<0){document.getElementById('st').textContent='That is not a RichpTV setup file.';return;}
+var b=document.getElementById('bk');b.disabled=false;b.value=t;document.querySelector('form').submit();};r.readAsText(f);}</script>
 <script>function sw(){var m=document.querySelector('input[name=mode]:checked').value;document.getElementById('x').style.display=m=='xtream'?'block':'none';document.getElementById('m').style.display=m=='m3u'?'block':'none';}</script>
 </body></html>"""
 
         private const val DONE = """<!doctype html><html><head><title>RichpTV</title>$STYLE</head><body>
-<h1>Sent ✓</h1><p>Look at your TV. Your playlist is loading now. You can close this page.</p></body></html>"""
+<h1>Sent ✓</h1><p>Look at your TV. Your channels are loading now. You can close this page.</p></body></html>"""
     }
 }
