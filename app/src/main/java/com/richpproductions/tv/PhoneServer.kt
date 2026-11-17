@@ -67,12 +67,17 @@ class PhoneServer(private val onSubmit: (Map<String, String>) -> Unit) {
     }
 
     companion object {
+        /** This device's address on the home network. Prefers Wi-Fi / Ethernet and skips
+         *  Fire TV's hidden Wi-Fi Direct (p2p) and VPN adapters, which have look-alike addresses. */
         fun localIp(): String? = try {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .filter { it.isUp && !it.isLoopback }
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<Inet4Address>()
-                .firstOrNull { it.isSiteLocalAddress }?.hostAddress
+            val cands = NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback && !it.isVirtual }
+                .filterNot { n -> listOf("p2p", "dummy", "rmnet", "tun", "ppp", "ap", "swlan").any { n.name.startsWith(it) } }
+                .flatMap { n -> n.inetAddresses.toList().filterIsInstance<Inet4Address>()
+                    .filter { it.isSiteLocalAddress }.map { n.name to it.hostAddress!! } }
+                .filterNot { it.second.startsWith("192.168.49.") }   // Wi-Fi Direct range
+            (cands.firstOrNull { it.first.startsWith("wlan") } ?: cands.firstOrNull { it.first.startsWith("eth") }
+                ?: cands.firstOrNull())?.second
         } catch (_: Exception) { null }
 
         private const val STYLE = """

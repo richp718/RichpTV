@@ -109,7 +109,7 @@ object Transfer {
         val code = "$last-$pin$portPart"
         val fileUrl = "http://$ip:${server.port}/richptv-backup?pin=$pin&file=1"
         val same = TextView(a).apply {
-            text = "SAME HOUSE\n\nOn the other TV choose\n\"Copy from another TV\" and enter:\n\n$code\n\n(Full address if asked: $ip)"
+            text = "SAME HOUSE\n\nOn the other TV choose\n\"Copy from another TV\" and enter:\n\n$code\n\nIf that fails, type the full address:\n$ip-$pin"
             textSize = 18f
             gravity = Gravity.CENTER
         }
@@ -188,40 +188,91 @@ object Transfer {
             .setNegativeButton("Cancel", null)
             .setOnDismissListener { phone.stop() }
             .show()
+        // Pressing Done / Next / Enter on the TV keyboard also starts the copy.
+        input.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        input.setOnEditorActionListener { _, _, _ ->
+            val code = input.text.toString()
+            dialog?.dismiss()
+            fetch(a, code, onDone)
+            true
+        }
         input.requestFocus()
     }
 
     private fun fetch(a: AppCompatActivity, raw: String, onDone: () -> Unit) {
-        val parts = raw.trim().split('-', ' ', ':', '/').filter { it.isNotBlank() }
-        if (parts.size < 2) { Toast.makeText(a, "That code doesn't look right. It looks like 45-4821.", Toast.LENGTH_LONG).show(); return }
+        val parts = raw.trim().split('-', ' ', ':', '/', ',').filter { it.isNotBlank() }
+        if (parts.size < 2) {
+            AlertDialog.Builder(a).setTitle("Copy didn't work")
+                .setMessage("That code doesn't look right. Type it exactly like it shows on the other TV, for example 45-4821.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
         val hostPart = parts[0]
         val pin = parts[1]
         val portIdx = parts.getOrNull(2)?.toIntOrNull()
-        val host = if (hostPart.contains('.')) hostPart else {
-            val mine = PhoneServer.localIp()
-            if (mine == null) { Toast.makeText(a, "Connect this TV to Wi-Fi first.", Toast.LENGTH_LONG).show(); return }
-            mine.substringBeforeLast('.') + "." + hostPart
+        val mine = PhoneServer.localIp()
+        if (mine == null && !hostPart.contains('.')) {
+            AlertDialog.Builder(a).setTitle("Copy didn't work").setMessage("Connect this TV to Wi-Fi first.")
+                .setPositiveButton("OK", null).show()
+            return
         }
+        val prefix = mine?.substringBeforeLast('.')
+        val host = if (hostPart.contains('.')) hostPart else "$prefix.$hostPart"
         val ports = if (portIdx != null) listOf(PORTS.first + portIdx - 1) else PORTS.toList()
-        val waiting = Toast.makeText(a, "Copying from the other TV…", Toast.LENGTH_LONG).also { it.show() }
+
+        val progress = AlertDialog.Builder(a).setTitle("Copying…")
+            .setMessage("Looking for the other TV. Keep its code box open.\n\nThis can take up to 30 seconds.")
+            .setCancelable(false).show()
         a.lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                val http = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
-                var err = "Couldn't reach the other TV. Make sure its code box is still open and both TVs are on the same Wi-Fi."
-                for (p in ports) {
-                    try {
-                        http.newCall(Request.Builder().url("http://$host:$p/richptv-backup?pin=$pin").build()).execute().use { r ->
-                            if (r.code == 403) { err = "Wrong code. Check the numbers on the other TV."; return@use }
-                            if (r.isSuccessful) {
-                                val j = JSONObject(r.body?.string() ?: "")
-                                if (j.optString("app") == "RichpTV") return@withContext j
+                val http = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+                var wrongPin = false
+                fun tryHost(h: String, ps: List<Int>): JSONObject? {
+                    for (p in ps) {
+                        try {
+                            http.newCall(Request.Builder().url("http://$h:$p/richptv-backup?pin=$pin").build()).execute().use { r ->
+                                if (r.code == 403) wrongPin = true
+                                if (r.isSuccessful) {
+                                    val j = JSONObject(r.body?.string() ?: "")
+                                    if (j.optString("app") == "RichpTV") return j
+                                }
                             }
-                        }
-                    } catch (_: Exception) { }
+                        } catch (_: Exception) { }
+                    }
+                    return null
                 }
-                err
+                tryHost(host, ports)?.let { return@withContext it }
+                if (wrongPin) return@withContext "Wrong code. Check the 4 numbers after the dash on the other TV."
+
+                // Not where the code said: look for the other TV anywhere on this network.
+                if (prefix != null) {
+                    val quick = OkHttpClient.Builder().connectTimeout(700, TimeUnit.MILLISECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+                    val found = java.util.concurrent.atomic.AtomicReference<JSONObject?>(null)
+                    val pool = java.util.concurrent.Executors.newFixedThreadPool(48)
+                    for (i in 1..254) for (p in ports) pool.execute {
+                        if (found.get() != null) return@execute
+                        try {
+                            quick.newCall(Request.Builder().url("http://$prefix.$i:$p/richptv-backup?pin=$pin").build()).execute().use { r ->
+                                if (r.code == 403) wrongPin = true
+                                if (r.isSuccessful) {
+                                    val j = JSONObject(r.body?.string() ?: "")
+                                    if (j.optString("app") == "RichpTV") found.compareAndSet(null, j)
+                                }
+                            }
+                        } catch (_: Exception) { }
+                    }
+                    pool.shutdown()
+                    pool.awaitTermination(40, TimeUnit.SECONDS)
+                    found.get()?.let { return@withContext it }
+                    if (wrongPin) return@withContext "Wrong code. Check the 4 numbers after the dash on the other TV."
+                }
+                "Couldn't find the other TV.\n\n" +
+                    "• Make sure its \"Copy to another TV\" box is still open.\n" +
+                    "• Both TVs must be on the same Wi-Fi (this TV is $mine).\n" +
+                    "• Or type the other TV's full address, then a dash and the 4 numbers, like 192.168.1.45-4821.\n\n" +
+                    "Another way: use the QR code and a setup file (works even on different Wi-Fi)."
             }
-            waiting.cancel()
+            progress.dismiss()
             if (result is JSONObject) {
                 Prefs.importAll(result)
                 Toast.makeText(a, "✓ Copied! Loading your channels…", Toast.LENGTH_LONG).show()
