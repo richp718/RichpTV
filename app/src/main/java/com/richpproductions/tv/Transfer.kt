@@ -146,7 +146,12 @@ object Transfer {
     fun showReceive(a: AppCompatActivity, onDone: () -> Unit) {
         val input = EditText(a).apply {
             hint = "Code, like 45-4821"
-            inputType = InputType.TYPE_CLASS_TEXT
+            // Number pad with a dash key; Done key set before the keyboard opens, and no
+            // full-screen keyboard so the Copy button stays visible.
+            inputType = InputType.TYPE_CLASS_PHONE
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE or
+                         android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+                         android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN
             textSize = 22f
             setSingleLine()
         }
@@ -188,13 +193,26 @@ object Transfer {
             .setNegativeButton("Cancel", null)
             .setOnDismissListener { phone.stop() }
             .show()
-        // Pressing Done / Next / Enter on the TV keyboard also starts the copy.
-        input.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
-        input.setOnEditorActionListener { _, _, _ ->
+        // Pressing Done / Next / Enter on the TV keyboard starts the copy right away.
+        var started = false
+        fun go() {
+            if (started) return
+            started = true
             val code = input.text.toString()
             dialog?.dismiss()
             fetch(a, code, onDone)
-            true
+        }
+        input.setOnEditorActionListener { _, _, _ -> go(); true }
+        input.setOnKeyListener { _, keyCode, e ->
+            if (e.action == android.view.KeyEvent.ACTION_UP &&
+                (keyCode == android.view.KeyEvent.KEYCODE_ENTER || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) &&
+                input.text.isNotBlank()) { go(); true } else false
+        }
+        // If the keyboard is closed with Back, pressing Down from the box lands on Copy.
+        dialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.let { b ->
+            b.id = android.view.View.generateViewId()
+            input.nextFocusDownId = b.id
+            b.setOnClickListener { go() }
         }
         input.requestFocus()
     }
